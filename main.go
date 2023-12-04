@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -94,7 +93,7 @@ func DownloadDashVideo(masterJsonUrl string, videoTitle string) {
 	fmt.Println("Combining video and audio...")
 
 	os.Mkdir("download", fs.ModePerm)
-	err = exec.Command(filepath.FromSlash("ffmpeg/bin/ffmpeg"),
+	err = exec.Command("ffmpeg",
 		"-i", vFileName,
 		"-i", aFileName,
 		"-c", "copy",
