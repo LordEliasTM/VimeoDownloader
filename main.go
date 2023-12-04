@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,20 +15,38 @@ import (
 	"github.com/dlclark/regexp2"
 )
 
-var wg sync.WaitGroup
+var regexPlayerConfig = regexp2.MustCompile(`(?<=<script>window\.playerConfig = ).+?(?=</script)`, regexp2.None)
+var regexAkamaized = regexp2.MustCompile(`(?<=akfire_interconnect_quic":{.+?"url":").+?(?=".*?},)`, regexp2.None)
+var regexVideoTitle = regexp2.MustCompile(`(?<="title":").+?(?=",)`, regexp2.None)
 
 func main() {
 	args := os.Args[1:]
-
 	url := args[0]
-	url = strings.Replace(url, "base64_init=1", "base64_init=0", -1)
-	baseUrlMatch, err := regexp2.MustCompile(`^.+(?=sep\/)`, regexp2.None).FindStringMatch(url)
+
+	fmt.Println("Downloading website...")
+	res, _ := http.Get(url)
+	bod, _ := io.ReadAll(res.Body)
+
+	playerConfig, _ := regexPlayerConfig.FindStringMatch(string(bod))
+	akamaized, _ := regexAkamaized.FindStringMatch(playerConfig.String())
+	videoTitle, _ := regexVideoTitle.FindStringMatch(playerConfig.String())
+
+	DownloadDashVideo(akamaized.String(), videoTitle.String())
+}
+
+var wg sync.WaitGroup
+
+func DownloadDashVideo(masterJsonUrl string, videoTitle string) {
+	masterJsonUrl = strings.Replace(masterJsonUrl, `\u0026`, "&", -1)
+	masterJsonUrl = strings.Replace(masterJsonUrl, "base64_init=1", "base64_init=0", -1)
+	baseUrlMatch, err := regexp2.MustCompile(`^.+(?=sep\/)`, regexp2.None).FindStringMatch(masterJsonUrl)
 	if err != nil {
 		panic(err)
 	}
 	baseUrl := baseUrlMatch.String()
 
-	resp, err := http.Get(url)
+	fmt.Println("Downloading master json...")
+	resp, err := http.Get(masterJsonUrl)
 	if err != nil {
 		panic(err)
 	}
@@ -74,19 +93,24 @@ func main() {
 
 	fmt.Println("Combining video and audio...")
 
-	exec.Command(filepath.FromSlash("ffmpeg/bin/ffmpeg"),
+	os.Mkdir("download", fs.ModePerm)
+	err = exec.Command(filepath.FromSlash("ffmpeg/bin/ffmpeg"),
 		"-i", vFileName,
 		"-i", aFileName,
 		"-c", "copy",
 		"-map", "0:v:0",
 		"-map", "1:a:0",
-		master.ClipId+".mp4",
+		"download/"+videoTitle+".mp4",
 	).Run()
+
+	if err != nil {
+		panic(err)
+	}
 
 	os.Remove(vFileName)
 	os.Remove(aFileName)
 
-	fmt.Println("Done! Output: ", master.ClipId+".mp4")
+	fmt.Println("Done! Output: ", videoTitle+".mp4")
 }
 
 func DownloadMediaSegments(media Media, baseUrl string, returnVal *string) {
